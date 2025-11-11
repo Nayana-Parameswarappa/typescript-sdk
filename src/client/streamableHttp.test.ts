@@ -591,6 +591,130 @@ describe('StreamableHTTPClientTransport', () => {
         await expect(transport.send(message)).rejects.toThrow(UnauthorizedError);
         expect(mockAuthProvider.redirectToAuthorization.mock.calls).toHaveLength(1);
     });
+    
+    it('attempts upscoping on 403 with WWW-Authenticate header', async () => {
+        const message: JSONRPCMessage = {
+            jsonrpc: '2.0',
+            method: 'test',
+            params: {},
+            id: 'test-id',
+        };
+
+        mockAuthProvider.tokens.mockResolvedValue({
+            access_token: 'test-token',
+            token_type: 'Bearer',
+            refresh_token: 'test-refresh',
+        });
+
+        const fetchMock = global.fetch as jest.Mock;
+        fetchMock
+        // First call: returns 403 with insufficient_scope
+        .mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            statusText: 'Forbidden',
+            headers: new Headers({
+            'WWW-Authenticate':
+                'Bearer error="insufficient_scope", scope="new_scope"',
+            }),
+            text: () => Promise.resolve('Insufficient scope'),
+        })
+        // Second call: successful after upscoping
+        .mockResolvedValueOnce({
+            ok: true,
+            status: 202,
+            headers: new Headers(),
+        });
+
+        // Spy on the imported auth function and mock successful authorization
+        const authModule = await import('./auth.js');
+        const authSpy = jest.spyOn(authModule, 'auth');
+        authSpy.mockResolvedValue('AUTHORIZED');
+
+        // Initial state of _scope and _hasTriedUpscoping
+        const transportAny = transport as any;
+        expect(transportAny._scope).toBeUndefined();
+        expect(transportAny._hasTriedUpscoping).toBe(false);
+
+        await transport.send(message);
+
+        // Verify fetch was called twice
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+
+        // Verify that _scope was updated
+        expect(transportAny._scope).toBe('new_scope');
+
+        // Verify auth was called with the new scope
+        expect(authSpy).toHaveBeenCalledWith(
+            mockAuthProvider,
+            expect.objectContaining({
+                scope: 'new_scope',
+            }),
+        );
+
+        // Verify that _hasTriedUpscoping was set to true during the process
+        expect(transportAny._hasTriedUpscoping).toBe(false); 
+        authSpy.mockRestore();
+    });
+
+    it('prevents infinite upscoping on repeated 403', async () => {
+        const message: JSONRPCMessage = {
+            jsonrpc: '2.0',
+            method: 'test',
+            params: {},
+            id: 'test-id',
+        };
+
+        mockAuthProvider.tokens.mockResolvedValue({
+            access_token: 'test-token',
+            token_type: 'Bearer',
+            refresh_token: 'test-refresh',
+        });
+
+        // Mock fetch calls to always return 403 with insufficient_scope
+        const fetchMock = global.fetch as jest.Mock;
+        fetchMock.mockResolvedValue({
+            ok: false,
+            status: 403,
+            statusText: 'Forbidden',
+            headers: new Headers({
+                'WWW-Authenticate':
+                'Bearer error="insufficient_scope", scope="new_scope"',
+            }),
+            text: () => Promise.resolve('Insufficient scope'),
+        });
+
+        // Spy on the imported auth function and mock successful authorization
+        const authModule = await import('./auth.js');
+        const authSpy = jest.spyOn(authModule, 'auth');
+        authSpy.mockResolvedValue('AUTHORIZED');
+
+        const transportAny = transport as any;
+        expect(transportAny._hasTriedUpscoping).toBe(false);
+
+        // First send: should trigger upscoping
+        await expect(transport.send(message)).rejects.toThrow(
+        'Server returned 403 after trying upscoping',
+        );
+
+        expect(fetchMock).toHaveBeenCalledTimes(2); // Initial call + one retry after auth
+        expect(authSpy).toHaveBeenCalledTimes(1); // Auth called once
+        expect(transportAny._scope).toBe('new_scope');
+        expect(transportAny._hasTriedUpscoping).toBe(true); // Flag should be true after the first attempt
+
+        // Second send: should fail immediately without re-calling auth
+        fetchMock.mockClear();
+        authSpy.mockClear();
+        await expect(transport.send(message)).rejects.toThrow(
+        'Server returned 403 after trying upscoping',
+        );
+
+        expect(fetchMock).toHaveBeenCalledTimes(1); // Only one fetch call
+        expect(authSpy).not.toHaveBeenCalled(); // Auth not called again
+        expect(transportAny._hasTriedUpscoping).toBe(true); // Flag remains true
+
+        authSpy.mockRestore();
+    });
 
     describe('Reconnection Logic', () => {
         let transport: StreamableHTTPClientTransport;

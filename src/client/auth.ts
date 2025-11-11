@@ -518,6 +518,34 @@ export function extractWWWAuthenticateParams(res: Response): { resourceMetadataU
 }
 
 /**
+ * Extracts the required scope string from a WWW-Authenticate header if the
+ * authentication error is "insufficient_scope".
+ */
+export function extractInsufficientScope(response: Response): string | undefined {
+    if (response.status !== 403) {
+        console.log(`Response status ${response.status} is not an authorization error.`);
+        return undefined;
+    }
+
+    const wwwAuthenticateHeader = response.headers.get('WWW-Authenticate');
+
+    if (!wwwAuthenticateHeader) {
+        console.log("WWW-Authenticate header not found.");
+        return undefined;
+    }
+
+    const regex = /error="insufficient_scope"[, ]*scope="([^"]*)"/i;
+    const match = wwwAuthenticateHeader.match(regex);
+
+    if (match && match[1]) {
+        return match[1];
+    }
+
+    console.log("Insufficient scope error not found in header.");
+    return undefined;
+}
+
+/**
  * Extract resource_metadata from response header.
  * @deprecated Use `extractWWWAuthenticateParams` instead.
  */

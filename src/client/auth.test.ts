@@ -9,6 +9,7 @@ import {
     registerClient,
     discoverOAuthProtectedResourceMetadata,
     extractWWWAuthenticateParams,
+    extractInsufficientScope,
     auth,
     type OAuthClientProvider,
     selectClientAuthMethod
@@ -84,6 +85,53 @@ describe('OAuth Authorization', () => {
             } as unknown as Response;
 
             expect(extractWWWAuthenticateParams(mockResponse)).toEqual({ scope: scope });
+        });
+    });
+
+    describe('extractInsufficientScope', () => {
+
+        it('returns scopes when 403 status and insufficient_scope is present', () => {
+            const mockResponse = {
+                status: 403,
+                headers: {
+                    get: jest.fn(name => (name === 'WWW-Authenticate' ? `Bearer realm="api", error="insufficient_scope", scope="user:write admin:read"` : null))
+                }
+            } as unknown as Response;
+            const scope = extractInsufficientScope(mockResponse);
+            expect(scope).toBe('user:write admin:read');
+        });
+
+        it('returns undefined if status is not 403', () => {
+            const mockResponse = {
+                status: 401,
+                headers: {
+                    get: jest.fn(name => (name === 'WWW-Authenticate' ? `Bearer realm="api", error="invalid_token"` : null))
+                }
+            } as unknown as Response;
+            const scope = extractInsufficientScope(mockResponse);
+            expect(scope).toBeUndefined();
+        });
+
+        it('returns undefined if insufficient_scope error is missing', () => {
+            const mockResponse = {
+                status: 403,
+                headers: {
+                    get: jest.fn(name => (name === 'WWW-Authenticate' ? `Bearer realm="api"` : null))
+                }
+            } as unknown as Response;
+            const scope = extractInsufficientScope(mockResponse);
+            expect(scope).toBeUndefined();
+        });
+
+        it('returns undefined if insufficient_scope is present but the scope parameter is missing', () => {
+            const mockResponse = {
+                status: 403,
+                headers: {
+                    get: jest.fn(name => (name === 'WWW-Authenticate' ? `Bearer realm="api", error="insufficient_scope"` : null))
+                }
+            } as unknown as Response;
+            const scope = extractInsufficientScope(mockResponse);
+            expect(scope).toBeUndefined();
         });
     });
 
