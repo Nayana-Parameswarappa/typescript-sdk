@@ -550,7 +550,7 @@ export function extractWWWAuthenticateParams(res: Response): { resourceMetadataU
  */
 export function extractInsufficientScope(response: Response): string | undefined {
     if (response.status !== 403) {
-        console.log(`Response status ${response.status} is not an a error.`);
+        console.log(`Response status ${response.status} is not an authorization error.`);
         return undefined;
     }
 
