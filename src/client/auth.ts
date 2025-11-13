@@ -459,7 +459,7 @@ async function authInternal(
  * Selects the appropriate OAuth scope to use.
  *
  * The priority order is:
- * 1.  The provided `scope` argument (if available)
+ * 1.  The provided `scope` argument (if available). The scope is usually provided by WWW-authenticate header.
  * 2.  Protected Resource Metadata scope (if available)
  * 3.  The `OAuthClientProvider.clientMetadata.scope` (if available)
  */
