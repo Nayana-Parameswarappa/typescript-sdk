@@ -446,13 +446,40 @@ async function authInternal(
         clientInformation,
         state,
         redirectUrl: provider.redirectUrl,
-        scope: scope || provider.clientMetadata.scope,
+        scope: selectScope(provider, resourceMetadata, scope),
         resource
     });
 
     await provider.saveCodeVerifier(codeVerifier);
     await provider.redirectToAuthorization(authorizationUrl);
     return 'REDIRECT';
+}
+
+/**
+ * Selects the appropriate OAuth scope to use.
+ *
+ * The priority order is:
+ * 1.  The provided `scope` argument (if available)
+ * 2.  Protected Resource Metadata scope (if available)
+ * 3.  The `OAuthClientProvider.clientMetadata.scope` (if available)
+ */
+export function selectScope(
+  provider: OAuthClientProvider,
+  resourceMetadata?: OAuthProtectedResourceMetadata,
+  scope?: string,
+): string | undefined {
+  if (scope) {
+    return scope;
+  }
+  
+ const scopes = resourceMetadata?.scopes_supported;
+  if (scopes && scopes.length > 0) {
+    return scopes.join(' ');
+  }
+
+  return provider.clientMetadata.scope;
+  
+
 }
 
 export async function selectResourceURL(
@@ -523,7 +550,7 @@ export function extractWWWAuthenticateParams(res: Response): { resourceMetadataU
  */
 export function extractInsufficientScope(response: Response): string | undefined {
     if (response.status !== 403) {
-        console.log(`Response status ${response.status} is not an authorization error.`);
+        console.log(`Response status ${response.status} is not an a error.`);
         return undefined;
     }
 

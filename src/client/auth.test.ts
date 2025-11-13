@@ -11,6 +11,7 @@ import {
     extractWWWAuthenticateParams,
     extractInsufficientScope,
     auth,
+    selectScope,
     type OAuthClientProvider,
     selectClientAuthMethod
 } from './auth.js';
@@ -138,6 +139,7 @@ describe('OAuth Authorization', () => {
     describe('discoverOAuthProtectedResourceMetadata', () => {
         const validMetadata = {
             resource: 'https://resource.example.com',
+            scopes_supported: ['read', 'write'],
             authorization_servers: ['https://auth.example.com']
         };
 
@@ -1544,6 +1546,8 @@ describe('OAuth Authorization', () => {
     });
 
     describe('auth function', () => {
+        let clientMetadataScope: string | undefined = undefined; 
+
         const mockProvider: OAuthClientProvider = {
             get redirectUrl() {
                 return 'http://localhost:3000/callback';
@@ -1551,7 +1555,8 @@ describe('OAuth Authorization', () => {
             get clientMetadata() {
                 return {
                     redirect_uris: ['http://localhost:3000/callback'],
-                    client_name: 'Test Client'
+                    client_name: 'Test Client',
+                    scope: clientMetadataScope,
                 };
             },
             clientInformation: jest.fn(),
@@ -1564,6 +1569,7 @@ describe('OAuth Authorization', () => {
 
         beforeEach(() => {
             jest.clearAllMocks();
+            clientMetadataScope = undefined; 
         });
 
         it('falls back to /.well-known/oauth-authorization-server when no protected-resource-metadata', async () => {
@@ -2261,6 +2267,166 @@ describe('OAuth Authorization', () => {
             // Verify custom fetch was called for AS metadata discovery
             expect(customFetch.mock.calls[1][0].toString()).toBe('https://auth.example.com/.well-known/oauth-authorization-server');
         });
+
+
+      it('prioritizes provided scope over resourceMetadata.scope', async () => {
+      const providedScope = 'provided_scope';
+      const resourceScope = 'resource_metadata_scope';
+      (mockProvider.clientMetadata as any).scope = 'client_metadata_scope';
+
+      mockFetch.mockImplementation((url) => {
+        if (url.toString().includes('/.well-known/oauth-protected-resource')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              resource: 'https://api.example.com/mcp-server',
+              scopes_supported: ['read', 'write'],
+              authorization_servers: ['https://auth.example.com'],
+            }),
+          });
+        } else if (
+          url.toString().includes('/.well-known/oauth-authorization-server')
+        ) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              issuer: 'https://auth.example.com',
+              authorization_endpoint: 'https://auth.example.com/authorize',
+              token_endpoint: 'https://auth.example.com/token',
+              response_types_supported: ['code'],
+              code_challenge_methods_supported: ['S256'],
+            }),
+          });
+        }
+        return Promise.resolve({ok: false, status: 404});
+      });
+      (mockProvider.clientInformation as jest.Mock).mockResolvedValue({
+        client_id: 'test-client',
+        client_secret: 'test-secret',
+      });
+      (mockProvider.tokens as jest.Mock).mockResolvedValue(undefined);
+      (mockProvider.saveCodeVerifier as jest.Mock).mockResolvedValue(undefined);
+      (mockProvider.redirectToAuthorization as jest.Mock).mockResolvedValue(
+        undefined,
+      );
+
+      await auth(mockProvider, {
+        serverUrl: 'https://api.example.com/mcp-server',
+        scope: providedScope,
+      });
+
+      const redirectCall = (mockProvider.redirectToAuthorization as jest.Mock)
+        .mock.calls[0];
+      const authUrl: URL = redirectCall[0];
+      expect(authUrl.searchParams.get('scope')).toBe(providedScope);
+    });
+
+    it('uses resourceMetadata.scope when provided scope is missing', async () => {
+      const resourceScope = 'resource_metadata_scope';
+      (mockProvider.clientMetadata as any).scope = 'client_metadata_scope';
+
+      mockFetch.mockImplementation((url) => {
+        if (url.toString().includes('/.well-known/oauth-protected-resource')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              resource: 'https://api.example.com/mcp-server',
+              scopes_supported: ['resource_metadata_scope'],
+              authorization_servers: ['https://auth.example.com'],
+            }),
+          });
+        } else if (
+          url.toString().includes('/.well-known/oauth-authorization-server')
+        ) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              issuer: 'https://auth.example.com',
+              authorization_endpoint: 'https://auth.example.com/authorize',
+              token_endpoint: 'https://auth.example.com/token',
+              response_types_supported: ['code'],
+              code_challenge_methods_supported: ['S256'],
+            }),
+          });
+        }
+        return Promise.resolve({ok: false, status: 404});
+      });
+      (mockProvider.clientInformation as jest.Mock).mockResolvedValue({
+        client_id: 'test-client',
+        client_secret: 'test-secret',
+      });
+      (mockProvider.tokens as jest.Mock).mockResolvedValue(undefined);
+      (mockProvider.saveCodeVerifier as jest.Mock).mockResolvedValue(undefined);
+      (mockProvider.redirectToAuthorization as jest.Mock).mockResolvedValue(
+        undefined,
+      );
+
+      await auth(mockProvider, {
+        serverUrl: 'https://api.example.com/mcp-server',
+      });
+
+      const redirectCall = (mockProvider.redirectToAuthorization as jest.Mock)
+        .mock.calls[0];
+      const authUrl: URL = redirectCall[0];
+      expect(authUrl.searchParams.get('scope')).toBe(resourceScope);
+    });
+
+    it('falls back to clientMetadata.scope when provided and resourceMetadata scopes are missing', async () => {
+      const expectedScope = 'client_metadata_scope';
+      clientMetadataScope = expectedScope;
+
+      mockFetch.mockImplementation((url) => {
+        if (url.toString().includes('/.well-known/oauth-protected-resource')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              resource: 'https://api.example.com/mcp-server',
+              resource_metadata_scope: [],
+              authorization_servers: ['https://auth.example.com'],
+            }),
+          });
+        } else if (
+          url.toString().includes('/.well-known/oauth-authorization-server')
+        ) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              issuer: 'https://auth.example.com',
+              authorization_endpoint: 'https://auth.example.com/authorize',
+              token_endpoint: 'https://auth.example.com/token',
+              response_types_supported: ['code'],
+              code_challenge_methods_supported: ['S256'],
+            }),
+          });
+        }
+        return Promise.resolve({ok: false, status: 404});
+      });
+      (mockProvider.clientInformation as jest.Mock).mockResolvedValue({
+        client_id: 'test-client',
+        client_secret: 'test-secret',
+      });
+      (mockProvider.tokens as jest.Mock).mockResolvedValue(undefined);
+      (mockProvider.saveCodeVerifier as jest.Mock).mockResolvedValue(undefined);
+      (mockProvider.redirectToAuthorization as jest.Mock).mockResolvedValue(
+        undefined,
+      );
+
+      await auth(mockProvider, {
+        serverUrl: 'https://api.example.com/mcp-server',
+      });
+
+      const redirectCall = (mockProvider.redirectToAuthorization as jest.Mock)
+        .mock.calls[0];
+      const authUrl: URL = redirectCall[0];
+      expect(authUrl.searchParams.get('scope')).toBe(clientMetadataScope);
+    });
+
     });
 
     describe('exchangeAuthorization with multiple client authentication methods', () => {
