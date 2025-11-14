@@ -10,7 +10,7 @@ import {
 import {
   auth,
   AuthResult,
-  extractInsufficientScope,
+  extractFieldFromWwwAuth,
   extractWWWAuthenticateParams,
   OAuthClientProvider,
   UnauthorizedError,
@@ -519,20 +519,30 @@ export class StreamableHTTPClientTransport implements Transport {
         }
 
         if (response.status === 403 && this._authProvider) {
-          // Prevent infinite recursion when upscoping was already tried.
-          if (this._hasTriedUpscoping) {
-            throw new StreamableHTTPError(
-              403,
-              'Server returned 403 after trying upscoping',
-            );
-          }
+          const error = extractFieldFromWwwAuth(response, 'error');
 
-          const scope = extractInsufficientScope(response);
+          if (error === 'insufficient_scope') {
+            // Prevent infinite recursion when upscoping was already tried.
+            if (this._hasTriedUpscoping) {
+              throw new StreamableHTTPError(
+                403,
+                'Server returned 403 after trying upscoping',
+              );
+            }
 
-          if (scope) {
+            const {resourceMetadataUrl, scope} =
+              extractWWWAuthenticateParams(response);
+
+            if (scope) {
+              this._scope = scope;
+            }
+
+            if (resourceMetadataUrl) {
+              this._resourceMetadataUrl = resourceMetadataUrl;
+            }
+
             // Mark that upscoping was tried.
             this._hasTriedUpscoping = true;
-            this._scope = scope;
             const result = await auth(this._authProvider, {
               serverUrl: this._url,
               resourceMetadataUrl: this._resourceMetadataUrl,

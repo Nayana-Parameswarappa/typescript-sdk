@@ -615,7 +615,7 @@ describe('StreamableHTTPClientTransport', () => {
             statusText: 'Forbidden',
             headers: new Headers({
             'WWW-Authenticate':
-                'Bearer error="insufficient_scope", scope="new_scope"',
+                'Bearer error="insufficient_scope", scope="new_scope", resource_metadata="http://example.com/resource"',
             }),
             text: () => Promise.resolve('Insufficient scope'),
         })
@@ -649,6 +649,7 @@ describe('StreamableHTTPClientTransport', () => {
             mockAuthProvider,
             expect.objectContaining({
                 scope: 'new_scope',
+                resourceMetadataUrl: new URL('http://example.com/resource'),
             }),
         );
 
